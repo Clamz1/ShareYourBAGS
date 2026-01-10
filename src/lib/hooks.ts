@@ -2,23 +2,11 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { useConnection } from '@solana/wallet-adapter-react';
-import {
-    createBagsSDK,
-    fetchTokenInfo,
-    fetchTopHolders,
-    fetchFeePoolInfo,
-    fetchAirdropHistory,
-    fetchPlatformTokens,
-    checkAirdropEligibility,
-    TokenInfo,
-    HolderInfo,
-    FeePoolInfo,
-    AirdropInfo
-} from './bags';
+import { TokenInfo, HolderInfo, FeePoolInfo, AirdropInfo } from './bags';
 import { CONFIG } from './config';
 import type { BagsSDK } from '@bagsfm/bags-sdk';
 
-// Hook to get SDK instance
+// Hook to get SDK instance (for transaction signing only)
 export function useBagsSDK() {
     const { connection } = useConnection();
     const [sdk, setSDK] = useState<BagsSDK | null>(null);
@@ -31,7 +19,9 @@ export function useBagsSDK() {
                     console.warn('Bags API key not configured, running in demo mode');
                     return;
                 }
-                const sdkInstance = await createBagsSDK(connection);
+                // Dynamically import to avoid SSR issues
+                const { BagsSDK } = await import('@bagsfm/bags-sdk');
+                const sdkInstance = new BagsSDK(CONFIG.BAGS_API_KEY, connection, 'confirmed');
                 setSDK(sdkInstance);
             } catch (err: any) {
                 setError(err.message);
@@ -43,30 +33,38 @@ export function useBagsSDK() {
     return { sdk, error };
 }
 
-// Hook to fetch token information
+// Hook to fetch token information via our API route
 export function useTokenInfo(tokenMint: string | null) {
-    const { sdk } = useBagsSDK();
     const [tokenInfo, setTokenInfo] = useState<TokenInfo | null>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
 
     const refetch = useCallback(async () => {
-        if (!sdk || !tokenMint) {
+        if (!tokenMint) {
             setLoading(false);
             return;
         }
 
         setLoading(true);
         try {
-            const info = await fetchTokenInfo(sdk, tokenMint);
-            setTokenInfo(info);
-            setError(null);
+            const response = await fetch(`/api/tokens/${tokenMint}`);
+            const data = await response.json();
+
+            if (data.token) {
+                setTokenInfo(data.token);
+                setError(null);
+            } else {
+                // Use demo data if API fails
+                setTokenInfo(null);
+                setError(data.error || 'Token not found');
+            }
         } catch (err: any) {
             setError(err.message);
+            setTokenInfo(null);
         } finally {
             setLoading(false);
         }
-    }, [sdk, tokenMint]);
+    }, [tokenMint]);
 
     useEffect(() => {
         refetch();
@@ -75,30 +73,31 @@ export function useTokenInfo(tokenMint: string | null) {
     return { tokenInfo, loading, error, refetch };
 }
 
-// Hook to fetch top holders
+// Hook to fetch top holders via our API route
 export function useTopHolders(tokenMint: string | null, limit: number = 100) {
-    const { sdk } = useBagsSDK();
     const [holders, setHolders] = useState<HolderInfo[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
 
     const refetch = useCallback(async () => {
-        if (!sdk || !tokenMint) {
+        if (!tokenMint) {
             setLoading(false);
             return;
         }
 
         setLoading(true);
         try {
-            const holderList = await fetchTopHolders(sdk, tokenMint, limit);
-            setHolders(holderList);
+            const response = await fetch(`/api/tokens/${tokenMint}/holders?limit=${limit}`);
+            const data = await response.json();
+            setHolders(data.holders || []);
             setError(null);
         } catch (err: any) {
             setError(err.message);
+            setHolders([]);
         } finally {
             setLoading(false);
         }
-    }, [sdk, tokenMint, limit]);
+    }, [tokenMint, limit]);
 
     useEffect(() => {
         refetch();
@@ -107,30 +106,31 @@ export function useTopHolders(tokenMint: string | null, limit: number = 100) {
     return { holders, loading, error, refetch };
 }
 
-// Hook to fetch fee pool info
+// Hook to fetch fee pool info via our API route
 export function useFeePool(tokenMint: string | null) {
-    const { sdk } = useBagsSDK();
     const [feePool, setFeePool] = useState<FeePoolInfo | null>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
 
     const refetch = useCallback(async () => {
-        if (!sdk || !tokenMint) {
+        if (!tokenMint) {
             setLoading(false);
             return;
         }
 
         setLoading(true);
         try {
-            const pool = await fetchFeePoolInfo(sdk, tokenMint);
-            setFeePool(pool);
+            const response = await fetch(`/api/tokens/${tokenMint}/fees`);
+            const data = await response.json();
+            setFeePool(data.feePool);
             setError(null);
         } catch (err: any) {
             setError(err.message);
+            setFeePool(null);
         } finally {
             setLoading(false);
         }
-    }, [sdk, tokenMint]);
+    }, [tokenMint]);
 
     useEffect(() => {
         refetch();
@@ -145,30 +145,31 @@ export function useFeePool(tokenMint: string | null) {
     return { feePool, loading, error, refetch };
 }
 
-// Hook to fetch airdrop history
+// Hook to fetch airdrop history via our API route
 export function useAirdropHistory(tokenMint: string | null) {
-    const { sdk } = useBagsSDK();
     const [airdrops, setAirdrops] = useState<AirdropInfo[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
 
     const refetch = useCallback(async () => {
-        if (!sdk || !tokenMint) {
+        if (!tokenMint) {
             setLoading(false);
             return;
         }
 
         setLoading(true);
         try {
-            const airdropList = await fetchAirdropHistory(sdk, tokenMint);
-            setAirdrops(airdropList);
+            const response = await fetch(`/api/tokens/${tokenMint}/airdrops`);
+            const data = await response.json();
+            setAirdrops(data.airdrops || []);
             setError(null);
         } catch (err: any) {
             setError(err.message);
+            setAirdrops([]);
         } finally {
             setLoading(false);
         }
-    }, [sdk, tokenMint]);
+    }, [tokenMint]);
 
     useEffect(() => {
         refetch();
@@ -177,33 +178,33 @@ export function useAirdropHistory(tokenMint: string | null) {
     return { airdrops, loading, error, refetch };
 }
 
-// Hook to fetch all platform tokens
+// Hook to fetch all platform tokens via our API route
 export function usePlatformTokens() {
-    const { sdk } = useBagsSDK();
     const [tokens, setTokens] = useState<TokenInfo[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
 
     const refetch = useCallback(async () => {
-        if (!sdk) {
-            // Return mock data in demo mode
-            setTokens(MOCK_TOKENS);
-            setLoading(false);
-            return;
-        }
-
         setLoading(true);
         try {
-            const tokenList = await fetchPlatformTokens();
-            setTokens(tokenList.length > 0 ? tokenList : MOCK_TOKENS);
-            setError(null);
+            const response = await fetch('/api/tokens');
+            const data = await response.json();
+
+            if (data.tokens && data.tokens.length > 0) {
+                setTokens(data.tokens);
+                setError(null);
+            } else {
+                // Use mock data if API returns empty
+                setTokens(MOCK_TOKENS);
+                setError(data.error || null);
+            }
         } catch (err: any) {
             setError(err.message);
             setTokens(MOCK_TOKENS);
         } finally {
             setLoading(false);
         }
-    }, [sdk]);
+    }, []);
 
     useEffect(() => {
         refetch();
@@ -214,28 +215,16 @@ export function usePlatformTokens() {
 
 // Hook for checking airdrop eligibility
 export function useAirdropEligibility(tokenMint: string | null) {
-    const { sdk } = useBagsSDK();
+    const { feePool } = useFeePool(tokenMint);
     const [isEligible, setIsEligible] = useState(false);
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
-        async function check() {
-            if (!sdk || !tokenMint) {
-                setLoading(false);
-                return;
-            }
-
-            try {
-                const eligible = await checkAirdropEligibility(sdk, tokenMint);
-                setIsEligible(eligible);
-            } catch {
-                setIsEligible(false);
-            } finally {
-                setLoading(false);
-            }
+        if (feePool) {
+            setIsEligible(feePool.balance >= 0.5);
+            setLoading(false);
         }
-        check();
-    }, [sdk, tokenMint]);
+    }, [feePool]);
 
     return { isEligible, loading };
 }
@@ -247,7 +236,7 @@ const MOCK_TOKENS: TokenInfo[] = [
         name: 'Share Demo Token',
         symbol: 'DEMO',
         description: 'A demonstration token for Share Your BAGS',
-        imageUrl: '/demo-token.png',
+        imageUrl: '',
         price: 0.00001234,
         marketCap: 12340,
         volume24h: 5678,
@@ -261,7 +250,7 @@ const MOCK_TOKENS: TokenInfo[] = [
         name: 'Community Rewards',
         symbol: 'CMNTY',
         description: 'A community-focused token with 50% holder rewards',
-        imageUrl: '/community-token.png',
+        imageUrl: '',
         price: 0.00005678,
         marketCap: 56780,
         volume24h: 12345,
@@ -275,7 +264,7 @@ const MOCK_TOKENS: TokenInfo[] = [
         name: 'Holder First',
         symbol: 'HLDR',
         description: 'Maximum holder rewards at 70%',
-        imageUrl: '/holder-token.png',
+        imageUrl: '',
         price: 0.00009999,
         marketCap: 99990,
         volume24h: 45678,
