@@ -8,9 +8,10 @@ interface NetworkNode {
     vx: number;
     vy: number;
     size: number;
+    color: string;
+    isMainNode: boolean;
+    label?: string;
     pulsePhase: number;
-    isHolder: boolean;
-    label: string;
 }
 
 interface Transaction {
@@ -19,15 +20,18 @@ interface Transaction {
     progress: number;
     speed: number;
     color: string;
-    isFeeDistribution: boolean;
+    size: number;
 }
 
 interface FeeAirdrop {
     sourceNode: number;
     targetNodes: number[];
-    progress: number;
-    life: number;
-    maxLife: number;
+    particles: Array<{
+        targetNode: number;
+        progress: number;
+        speed: number;
+    }>;
+    active: boolean;
 }
 
 export function PlasmaBackground() {
@@ -41,331 +45,264 @@ export function PlasmaBackground() {
     useEffect(() => {
         const canvas = canvasRef.current;
         if (!canvas) return;
-
         const ctx = canvas.getContext('2d');
         if (!ctx) return;
 
+        let width = window.innerWidth;
+        let height = window.innerHeight;
+
         const resize = () => {
-            canvas.width = window.innerWidth;
-            canvas.height = window.innerHeight;
+            width = window.innerWidth;
+            height = window.innerHeight;
+            canvas.width = width;
+            canvas.height = height;
             initNodes();
         };
 
         const initNodes = () => {
             nodesRef.current = [];
 
-            const mainNodeCount = Math.floor(canvas.width / 350) + 2;
-            for (let i = 0; i < mainNodeCount; i++) {
-                nodesRef.current.push({
-                    x: (canvas.width / (mainNodeCount + 1)) * (i + 1) + (Math.random() - 0.5) * 100,
-                    y: canvas.height * 0.3 + (Math.random() - 0.5) * 150,
-                    vx: (Math.random() - 0.5) * 0.15,
-                    vy: (Math.random() - 0.5) * 0.15,
-                    size: 12 + Math.random() * 6,
-                    pulsePhase: Math.random() * Math.PI * 2,
-                    isHolder: false,
-                    label: ['TOKEN', 'POOL', 'FEE'][i % 3],
-                });
-            }
+            // Create 3 main nodes (Pool, Token, Fee Contract)
+            const mainPositions = [
+                { x: width * 0.2, y: height * 0.3, label: 'Token' },
+                { x: width * 0.5, y: height * 0.5, label: 'Pool' },
+                { x: width * 0.8, y: height * 0.4, label: 'Fees' },
+            ];
 
-            const holderCount = Math.floor(canvas.width / 150) + 6;
+            mainPositions.forEach((pos, i) => {
+                nodesRef.current.push({
+                    x: pos.x,
+                    y: pos.y,
+                    vx: 0,
+                    vy: 0,
+                    size: 20 + Math.random() * 10,
+                    color: i === 2 ? '#FFD700' : (i === 0 ? '#9945FF' : '#14F195'),
+                    isMainNode: true,
+                    label: pos.label,
+                    pulsePhase: Math.random() * Math.PI * 2,
+                });
+            });
+
+            // Create holder nodes around the main nodes
+            const holderCount = Math.min(25, Math.floor((width * height) / 50000));
             for (let i = 0; i < holderCount; i++) {
                 nodesRef.current.push({
-                    x: Math.random() * canvas.width,
-                    y: canvas.height * 0.4 + Math.random() * canvas.height * 0.5,
-                    vx: (Math.random() - 0.5) * 0.25,
-                    vy: (Math.random() - 0.5) * 0.25,
-                    size: 4 + Math.random() * 3,
+                    x: Math.random() * width,
+                    y: Math.random() * height,
+                    vx: (Math.random() - 0.5) * 0.3,
+                    vy: (Math.random() - 0.5) * 0.3,
+                    size: 4 + Math.random() * 4,
+                    color: `rgba(${153 + Math.random() * 50}, ${69 + Math.random() * 100}, ${255}, 0.6)`,
+                    isMainNode: false,
                     pulsePhase: Math.random() * Math.PI * 2,
-                    isHolder: true,
-                    label: '',
                 });
             }
         };
 
-        resize();
-        window.addEventListener('resize', resize);
+        const createTransaction = () => {
+            if (nodesRef.current.length < 4) return;
 
-        const colors = {
-            purple: 'rgba(153, 69, 255,',
-            teal: 'rgba(20, 241, 149,',
-            gold: 'rgba(255, 200, 50,',
+            const mainNodes = [0, 1, 2];
+            const holderNodes = nodesRef.current.slice(3).map((_, i) => i + 3);
+
+            if (Math.random() > 0.7 && holderNodes.length > 0) {
+                const from = holderNodes[Math.floor(Math.random() * holderNodes.length)];
+                const to = mainNodes[Math.floor(Math.random() * mainNodes.length)];
+                transactionsRef.current.push({
+                    fromNode: from,
+                    toNode: to,
+                    progress: 0,
+                    speed: 0.005 + Math.random() * 0.01,
+                    color: '#14F195',
+                    size: 2,
+                });
+            }
         };
 
-        const createTransaction = (): Transaction | null => {
-            const nodes = nodesRef.current;
-            if (nodes.length < 2) return null;
+        const triggerFeeAirdrop = () => {
+            if (nodesRef.current.length < 6) return;
 
-            const fromNode = Math.floor(Math.random() * nodes.length);
-            let toNode = Math.floor(Math.random() * nodes.length);
-            while (toNode === fromNode) {
-                toNode = Math.floor(Math.random() * nodes.length);
+            const now = Date.now();
+            // Trigger every 5-30 seconds
+            if (now - lastAirdropRef.current < 5000 + Math.random() * 25000) return;
+
+            lastAirdropRef.current = now;
+
+            // Fee node (index 2) sends to random holder nodes
+            const holderNodes = nodesRef.current.slice(3).map((_, i) => i + 3);
+            const targetCount = Math.min(10, Math.floor(holderNodes.length * 0.4));
+            const targets: number[] = [];
+
+            for (let i = 0; i < targetCount; i++) {
+                const randomHolder = holderNodes[Math.floor(Math.random() * holderNodes.length)];
+                if (!targets.includes(randomHolder)) {
+                    targets.push(randomHolder);
+                }
             }
 
-            return {
-                fromNode,
-                toNode,
-                progress: 0,
-                speed: 0.006 + Math.random() * 0.008,
-                color: Math.random() > 0.5 ? colors.purple : colors.teal,
-                isFeeDistribution: false,
-            };
+            if (targets.length > 0) {
+                airdropsRef.current.push({
+                    sourceNode: 2,
+                    targetNodes: targets,
+                    particles: targets.map(t => ({
+                        targetNode: t,
+                        progress: 0,
+                        speed: 0.008 + Math.random() * 0.005,
+                    })),
+                    active: true,
+                });
+            }
         };
 
-        const createFeeAirdrop = (): FeeAirdrop | null => {
-            const nodes = nodesRef.current;
-            const mainNodes = nodes.filter((n) => !n.isHolder);
-            const holderNodes = nodes.map((n, i) => ({ node: n, index: i })).filter(n => n.node.isHolder);
+        const drawNode = (node: NetworkNode) => {
+            const pulse = Math.sin(Date.now() * 0.002 + node.pulsePhase) * 0.2 + 1;
+            const size = node.size * pulse;
 
-            if (mainNodes.length === 0 || holderNodes.length < 3) return null;
+            // Glow
+            const gradient = ctx.createRadialGradient(node.x, node.y, 0, node.x, node.y, size * 3);
+            gradient.addColorStop(0, node.color);
+            gradient.addColorStop(1, 'transparent');
+            ctx.fillStyle = gradient;
+            ctx.beginPath();
+            ctx.arc(node.x, node.y, size * 3, 0, Math.PI * 2);
+            ctx.fill();
 
-            const sourceIdx = nodesRef.current.findIndex(n => !n.isHolder);
-            const targetCount = Math.min(5 + Math.floor(Math.random() * 6), holderNodes.length);
-            const shuffled = holderNodes.sort(() => Math.random() - 0.5);
-            const targets = shuffled.slice(0, targetCount).map(n => n.index);
+            // Core
+            ctx.fillStyle = node.color;
+            ctx.beginPath();
+            ctx.arc(node.x, node.y, size, 0, Math.PI * 2);
+            ctx.fill();
 
-            return {
-                sourceNode: sourceIdx,
-                targetNodes: targets,
-                progress: 0,
-                life: 0,
-                maxLife: 150,
-            };
+            // Label for main nodes
+            if (node.isMainNode && node.label) {
+                ctx.fillStyle = 'rgba(255,255,255,0.5)';
+                ctx.font = '10px system-ui';
+                ctx.textAlign = 'center';
+                ctx.fillText(node.label, node.x, node.y + size + 15);
+            }
+        };
+
+        const drawConnection = (from: NetworkNode, to: NetworkNode, alpha: number = 0.1) => {
+            ctx.strokeStyle = `rgba(153, 69, 255, ${alpha})`;
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(from.x, from.y);
+            ctx.lineTo(to.x, to.y);
+            ctx.stroke();
+        };
+
+        const drawTransaction = (tx: Transaction) => {
+            const from = nodesRef.current[tx.fromNode];
+            const to = nodesRef.current[tx.toNode];
+            if (!from || !to) return;
+
+            const x = from.x + (to.x - from.x) * tx.progress;
+            const y = from.y + (to.y - from.y) * tx.progress;
+
+            ctx.fillStyle = tx.color;
+            ctx.beginPath();
+            ctx.arc(x, y, tx.size, 0, Math.PI * 2);
+            ctx.fill();
+        };
+
+        const drawAirdropParticle = (sourceNode: NetworkNode, particle: { targetNode: number; progress: number }) => {
+            const target = nodesRef.current[particle.targetNode];
+            if (!target) return;
+
+            const x = sourceNode.x + (target.x - sourceNode.x) * particle.progress;
+            const y = sourceNode.y + (target.y - sourceNode.y) * particle.progress;
+
+            // Golden glow for fee distribution
+            const gradient = ctx.createRadialGradient(x, y, 0, x, y, 6);
+            gradient.addColorStop(0, '#FFD700');
+            gradient.addColorStop(1, 'transparent');
+            ctx.fillStyle = gradient;
+            ctx.beginPath();
+            ctx.arc(x, y, 6, 0, Math.PI * 2);
+            ctx.fill();
+
+            ctx.fillStyle = '#FFD700';
+            ctx.beginPath();
+            ctx.arc(x, y, 3, 0, Math.PI * 2);
+            ctx.fill();
         };
 
         const animate = () => {
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
-            const time = Date.now() * 0.001;
+            ctx.clearRect(0, 0, width, height);
 
-            const orbGradient1 = ctx.createRadialGradient(
-                canvas.width * 0.15, canvas.height * 0.25, 0,
-                canvas.width * 0.15, canvas.height * 0.25, canvas.width * 0.4
-            );
-            orbGradient1.addColorStop(0, 'rgba(153, 69, 255, 0.08)');
-            orbGradient1.addColorStop(1, 'rgba(153, 69, 255, 0)');
-            ctx.fillStyle = orbGradient1;
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            // Dark gradient background
+            const bgGradient = ctx.createLinearGradient(0, 0, 0, height);
+            bgGradient.addColorStop(0, '#0a0a0f');
+            bgGradient.addColorStop(1, '#0f0a1a');
+            ctx.fillStyle = bgGradient;
+            ctx.fillRect(0, 0, width, height);
 
-            const orbGradient2 = ctx.createRadialGradient(
-                canvas.width * 0.85, canvas.height * 0.75, 0,
-                canvas.width * 0.85, canvas.height * 0.75, canvas.width * 0.4
-            );
-            orbGradient2.addColorStop(0, 'rgba(20, 241, 149, 0.06)');
-            orbGradient2.addColorStop(1, 'rgba(20, 241, 149, 0)');
-            ctx.fillStyle = orbGradient2;
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            // Update and draw nodes
+            nodesRef.current.forEach((node, i) => {
+                if (!node.isMainNode) {
+                    node.x += node.vx;
+                    node.y += node.vy;
 
-            nodesRef.current.forEach((node) => {
-                node.x += node.vx;
-                node.y += node.vy;
+                    // Bounce off edges
+                    if (node.x < 0 || node.x > width) node.vx *= -1;
+                    if (node.y < 0 || node.y > height) node.vy *= -1;
 
-                if (node.x < -30) node.x = canvas.width + 30;
-                if (node.x > canvas.width + 30) node.x = -30;
-                if (node.y < -30) node.y = canvas.height + 30;
-                if (node.y > canvas.height + 30) node.y = -30;
-
-                const pulse = 1 + Math.sin(time * 2 + node.pulsePhase) * 0.15;
-                const size = node.size * pulse;
-
-                if (node.isHolder) {
-                    const gradient = ctx.createRadialGradient(node.x, node.y, 0, node.x, node.y, size * 3);
-                    gradient.addColorStop(0, 'rgba(20, 241, 149, 0.25)');
-                    gradient.addColorStop(0.5, 'rgba(20, 241, 149, 0.08)');
-                    gradient.addColorStop(1, 'rgba(20, 241, 149, 0)');
-                    ctx.fillStyle = gradient;
-                    ctx.beginPath();
-                    ctx.arc(node.x, node.y, size * 3, 0, Math.PI * 2);
-                    ctx.fill();
-
-                    ctx.beginPath();
-                    ctx.arc(node.x, node.y, size, 0, Math.PI * 2);
-                    ctx.fillStyle = 'rgba(20, 241, 149, 0.4)';
-                    ctx.fill();
-                    ctx.strokeStyle = 'rgba(20, 241, 149, 0.6)';
-                    ctx.lineWidth = 1;
-                    ctx.stroke();
-                } else {
-                    const gradient = ctx.createRadialGradient(node.x, node.y, 0, node.x, node.y, size * 5);
-                    gradient.addColorStop(0, 'rgba(153, 69, 255, 0.3)');
-                    gradient.addColorStop(0.4, 'rgba(153, 69, 255, 0.1)');
-                    gradient.addColorStop(1, 'rgba(153, 69, 255, 0)');
-                    ctx.fillStyle = gradient;
-                    ctx.beginPath();
-                    ctx.arc(node.x, node.y, size * 5, 0, Math.PI * 2);
-                    ctx.fill();
-
-                    ctx.beginPath();
-                    for (let i = 0; i < 6; i++) {
-                        const angle = (Math.PI / 3) * i - Math.PI / 6;
-                        const px = node.x + Math.cos(angle) * size * 1.2;
-                        const py = node.y + Math.sin(angle) * size * 1.2;
-                        if (i === 0) ctx.moveTo(px, py);
-                        else ctx.lineTo(px, py);
-                    }
-                    ctx.closePath();
-                    ctx.fillStyle = 'rgba(153, 69, 255, 0.2)';
-                    ctx.fill();
-                    ctx.strokeStyle = 'rgba(153, 69, 255, 0.5)';
-                    ctx.lineWidth = 2;
-                    ctx.stroke();
-
-                    ctx.beginPath();
-                    ctx.arc(node.x, node.y, size * 0.5, 0, Math.PI * 2);
-                    ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
-                    ctx.fill();
-
-                    ctx.beginPath();
-                    ctx.arc(node.x, node.y, size * 0.9, 0, Math.PI * 2);
-                    ctx.strokeStyle = 'rgba(20, 241, 149, 0.4)';
-                    ctx.lineWidth = 1;
-                    ctx.stroke();
+                    // Slight drift
+                    node.vx += (Math.random() - 0.5) * 0.01;
+                    node.vy += (Math.random() - 0.5) * 0.01;
+                    node.vx *= 0.99;
+                    node.vy *= 0.99;
                 }
             });
 
-            nodesRef.current.forEach((node1, i) => {
-                nodesRef.current.slice(i + 1).forEach((node2) => {
-                    const dx = node1.x - node2.x;
-                    const dy = node1.y - node2.y;
-                    const distance = Math.sqrt(dx * dx + dy * dy);
-                    const maxDist = node1.isHolder && node2.isHolder ? 150 : 350;
-
-                    if (distance < maxDist) {
-                        const opacity = (1 - distance / maxDist) * 0.15;
-
-                        ctx.beginPath();
-                        ctx.setLineDash([3, 6]);
-                        ctx.moveTo(node1.x, node1.y);
-                        ctx.lineTo(node2.x, node2.y);
-                        ctx.strokeStyle = `rgba(153, 69, 255, ${opacity})`;
-                        ctx.lineWidth = 1;
-                        ctx.stroke();
-                        ctx.setLineDash([]);
+            // Draw connections between nearby nodes
+            for (let i = 0; i < nodesRef.current.length; i++) {
+                for (let j = i + 1; j < nodesRef.current.length; j++) {
+                    const a = nodesRef.current[i];
+                    const b = nodesRef.current[j];
+                    const dist = Math.hypot(a.x - b.x, a.y - b.y);
+                    if (dist < 200) {
+                        drawConnection(a, b, 0.05 * (1 - dist / 200));
                     }
-                });
-            });
-
-            if (Math.random() < 0.015 && transactionsRef.current.length < 6) {
-                const tx = createTransaction();
-                if (tx) transactionsRef.current.push(tx);
-            }
-
-            if (time - lastAirdropRef.current > 5 + Math.random() * 25 && airdropsRef.current.length === 0) {
-                const airdrop = createFeeAirdrop();
-                if (airdrop) {
-                    airdropsRef.current.push(airdrop);
-                    lastAirdropRef.current = time;
                 }
             }
 
-            transactionsRef.current = transactionsRef.current.filter((tx) => {
-                const fromNode = nodesRef.current[tx.fromNode];
-                const toNode = nodesRef.current[tx.toNode];
-                if (!fromNode || !toNode) return false;
+            // Draw nodes
+            nodesRef.current.forEach(drawNode);
 
+            // Create and update transactions
+            if (Math.random() > 0.98) createTransaction();
+            transactionsRef.current = transactionsRef.current.filter(tx => {
                 tx.progress += tx.speed;
-
-                const x = fromNode.x + (toNode.x - fromNode.x) * tx.progress;
-                const y = fromNode.y + (toNode.y - fromNode.y) * tx.progress;
-
-                const trailLen = 0.12;
-                const ts = Math.max(0, tx.progress - trailLen);
-                const tx1 = fromNode.x + (toNode.x - fromNode.x) * ts;
-                const ty1 = fromNode.y + (toNode.y - fromNode.y) * ts;
-
-                const trailGrad = ctx.createLinearGradient(tx1, ty1, x, y);
-                trailGrad.addColorStop(0, tx.color + '0)');
-                trailGrad.addColorStop(1, tx.color + '0.5)');
-
-                ctx.beginPath();
-                ctx.moveTo(tx1, ty1);
-                ctx.lineTo(x, y);
-                ctx.strokeStyle = trailGrad;
-                ctx.lineWidth = 2;
-                ctx.lineCap = 'round';
-                ctx.stroke();
-
-                const packetGrad = ctx.createRadialGradient(x, y, 0, x, y, 6);
-                packetGrad.addColorStop(0, 'rgba(255,255,255,0.8)');
-                packetGrad.addColorStop(0.4, tx.color + '0.6)');
-                packetGrad.addColorStop(1, tx.color + '0)');
-                ctx.beginPath();
-                ctx.arc(x, y, 6, 0, Math.PI * 2);
-                ctx.fillStyle = packetGrad;
-                ctx.fill();
-
-                return tx.progress < 1;
+                if (tx.progress < 1) {
+                    drawTransaction(tx);
+                    return true;
+                }
+                return false;
             });
 
-            airdropsRef.current = airdropsRef.current.filter((airdrop) => {
-                airdrop.life++;
-                airdrop.progress = Math.min(airdrop.life / 80, 1);
-
+            // Trigger and draw fee airdrops
+            triggerFeeAirdrop();
+            airdropsRef.current = airdropsRef.current.filter(airdrop => {
                 const sourceNode = nodesRef.current[airdrop.sourceNode];
                 if (!sourceNode) return false;
 
-                if (airdrop.life < 30) {
-                    const ringRadius = (airdrop.life / 30) * 40;
-                    const ringOpacity = 1 - (airdrop.life / 30);
-                    ctx.beginPath();
-                    ctx.arc(sourceNode.x, sourceNode.y, ringRadius, 0, Math.PI * 2);
-                    ctx.strokeStyle = `rgba(255, 200, 50, ${ringOpacity * 0.6})`;
-                    ctx.lineWidth = 3;
-                    ctx.stroke();
-                }
-
-                airdrop.targetNodes.forEach((targetIdx, i) => {
-                    const targetNode = nodesRef.current[targetIdx];
-                    if (!targetNode) return;
-
-                    const delay = i * 0.05;
-                    const progress = Math.max(0, Math.min(1, (airdrop.progress - delay) / (1 - delay)));
-
-                    if (progress <= 0) return;
-
-                    const x = sourceNode.x + (targetNode.x - sourceNode.x) * progress;
-                    const y = sourceNode.y + (targetNode.y - sourceNode.y) * progress;
-
-                    const trailLen = 0.15;
-                    const ts = Math.max(0, progress - trailLen);
-                    const tx1 = sourceNode.x + (targetNode.x - sourceNode.x) * ts;
-                    const ty1 = sourceNode.y + (targetNode.y - sourceNode.y) * ts;
-
-                    const trailGrad = ctx.createLinearGradient(tx1, ty1, x, y);
-                    trailGrad.addColorStop(0, 'rgba(255, 200, 50, 0)');
-                    trailGrad.addColorStop(1, 'rgba(255, 200, 50, 0.7)');
-
-                    ctx.beginPath();
-                    ctx.moveTo(tx1, ty1);
-                    ctx.lineTo(x, y);
-                    ctx.strokeStyle = trailGrad;
-                    ctx.lineWidth = 2.5;
-                    ctx.lineCap = 'round';
-                    ctx.stroke();
-
-                    const packetGrad = ctx.createRadialGradient(x, y, 0, x, y, 8);
-                    packetGrad.addColorStop(0, 'rgba(255, 255, 255, 0.9)');
-                    packetGrad.addColorStop(0.3, 'rgba(255, 200, 50, 0.8)');
-                    packetGrad.addColorStop(1, 'rgba(255, 200, 50, 0)');
-                    ctx.beginPath();
-                    ctx.arc(x, y, 8, 0, Math.PI * 2);
-                    ctx.fillStyle = packetGrad;
-                    ctx.fill();
-
-                    if (progress > 0.95) {
-                        const flashOpacity = (1 - (progress - 0.95) / 0.05) * 0.5;
-                        ctx.beginPath();
-                        ctx.arc(targetNode.x, targetNode.y, 15, 0, Math.PI * 2);
-                        ctx.fillStyle = `rgba(255, 200, 50, ${flashOpacity})`;
-                        ctx.fill();
+                let stillActive = false;
+                airdrop.particles.forEach(particle => {
+                    particle.progress += particle.speed;
+                    if (particle.progress < 1) {
+                        stillActive = true;
+                        drawAirdropParticle(sourceNode, particle);
                     }
                 });
-
-                return airdrop.life < airdrop.maxLife;
+                return stillActive;
             });
 
             animationRef.current = requestAnimationFrame(animate);
         };
 
+        window.addEventListener('resize', resize);
+        resize();
         animate();
 
         return () => {
