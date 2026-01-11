@@ -211,10 +211,18 @@ export default function ExplorePage() {
                     </div>
                 </div>
 
-                {/* Error State */}
+                {/* Info/Status Message */}
                 {error && (
-                    <div className="glass-card p-4 mb-6 border border-red-500/30 bg-red-500/10">
-                        <p className="text-red-400 text-sm">⚠️ {error}</p>
+                    <div className={`glass-card p-4 mb-6 border ${error.includes('connected successfully')
+                            ? 'border-green-500/30 bg-green-500/10'
+                            : 'border-yellow-500/30 bg-yellow-500/10'
+                        }`}>
+                        <p className={`text-sm ${error.includes('connected successfully')
+                                ? 'text-green-400'
+                                : 'text-yellow-400'
+                            }`}>
+                            {error.includes('connected successfully') ? '✅' : 'ℹ️'} {error}
+                        </p>
                     </div>
                 )}
 

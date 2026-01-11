@@ -192,7 +192,12 @@ export function usePlatformTokens() {
 
             if (data.tokens && data.tokens.length > 0) {
                 setTokens(data.tokens);
-                setError(null);
+                // Only show error if API is not connected, otherwise show the message
+                if (data.apiConnected) {
+                    setError(data.message || null);
+                } else {
+                    setError(data.error || null);
+                }
             } else {
                 // Use mock data if API returns empty
                 setTokens(MOCK_TOKENS);
